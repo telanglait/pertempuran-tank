@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="id">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Pertempuran Tank</title>
+		<style>
+			body {
+				background-color: #1a1a1a;
+				color: #f0f0f0;
+				font-family: "Courier New", Courier, monospace;
+				display: flex;
+				justify-content: center;
+				align-items: center;
+				height: 100vh;
+				margin: 0;
+				flex-direction: column;
+			}
+			.game-container {
+				border: 2px solid #444;
+				box-shadow: 0 0 20px rgba(0, 255, 136, 0.5);
+			}
+			canvas {
+				background-color: #001a00;
+				display: block;
+			}
+			h1 {
+				color: #00ff88;
+				text-shadow: 0 0 10px #00ff88;
+			}
+			.hud {
+				display: flex;
+				justify-content: space-between;
+				width: 800px;
+				padding: 10px 0;
+				font-size: 1.5em;
+			}
+			.game-message {
+				position: absolute;
+				top: 50%;
+				left: 50%;
+				transform: translate(-50%, -50%);
+				background-color: rgba(0, 0, 0, 0.8);
+				padding: 40px;
+				border-radius: 10px;
+				text-align: center;
+				display: none; /* Sembunyikan secara default */
+				border: 2px solid #00ff88;
+			}
+			.game-message h2 {
+				margin: 0;
+				font-size: 3em;
+				color: #00ff88;
+			}
+			.game-message p {
+				font-size: 1.2em;
+			}
+			#restart-button {
+				margin-top: 20px;
+				padding: 10px 20px;
+				font-size: 1em;
+				cursor: pointer;
+				background-color: #00ff88;
+				color: #1a1a1a;
+				border: none;
+				border-radius: 5px;
+				font-weight: bold;
+			}
+		</style>
+	</head>
+	<body>
+		<h1>Pertempuran Tank</h1>
+		<div class="hud">
+			<div id="score">Skor: 0</div>
+			<div id="health">Kesehatan: 100</div>
+		</div>
+		<div class="game-container">
+			<canvas id="gameCanvas" width="800" height="600"></canvas>
+		</div>
+		<div id="game-over-screen" class="game-message">
+			<h2 id="game-over-title">GAME OVER</h2>
+			<p id="final-score">Skor Akhir: 0</p>
+			<button id="restart-button">Mulai Ulang</button>
+		</div>
+
+		<script>
+			// --- Inisialisasi Canvas dan Elemen UI ---
+			const canvas = document.getElementById("gameCanvas");
+			const ctx = canvas.getContext("2d");
+			const scoreEl = document.getElementById("score");
+			const healthEl = document.getElementById("health");
+			const gameOverScreen = document.getElementById("game-over-screen");
+			const gameOverTitle = document.getElementById("game-over-title");
+			const finalScoreEl = document.getElementById("final-score");
+			const restartButton = document.getElementById("restart-button");
+
+			// --- Konfigurasi Game ---
+			const TANK_SIZE = 40;
+			const TURRET_LENGTH = 30;
+			const TURRET_WIDTH = 8;
+			const BULLET_SIZE = 5;
+			const PLAYER_SPEED = 3;
+			const ENEMY_SPEED = 1;
+			const BULLET_SPEED = 6;
+			const ENEMY_COUNT = 5;
+			const ENEMY_SHOOT_INTERVAL = 100; // musuh menembak setiap 100 frame
+
+			// --- Variabel Status Game ---
+			let player, enemies, bullets, enemyBullets;
+			let score, playerHealth;
+			let keys = {};
+			let isGameOver = false;
+			let frameCount = 0;
+
+			// --- Fungsi untuk Menggambar ---
+
+			/**
+			 * Menggambar sebuah tank di canvas.
+			 * @param {number} x - Posisi x tank.
+			 * @param {number} y - Posisi y tank.
+			 * @param {string} color - Warna badan tank.
+			 * @param {number} angle - Sudut moncong (turret) tank dalam radian.
+			 */
+			function drawTank(x, y, color, angle) {
+				ctx.save();
+				ctx.translate(x, y);
+
+				// Gambar badan tank
+				ctx.fillStyle = color;
+				ctx.fillRect(-TANK_SIZE / 2, -TANK_SIZE / 2, TANK_SIZE, TANK_SIZE);
+
+				// Gambar moncong (turret)
+				ctx.rotate(angle);
+				ctx.fillStyle = "#999";
+				ctx.fillRect(0, -TURRET_WIDTH / 2, TURRET_LENGTH, TURRET_WIDTH);
+
+				ctx.restore();
+			}
+
+			/**
+			 * Menggambar peluru di canvas.
+			 * @param {object} bullet - Objek peluru.
+			 */
+			function drawBullet(bullet) {
+				ctx.fillStyle = bullet.color;
+				ctx.beginPath();
+				ctx.arc(bullet.x, bullet.y, BULLET_SIZE, 0, Math.PI * 2);
+				ctx.fill();
+			}
+
+			// --- Logika Game ---
+
+			/**
+			 * Inisialisasi atau reset game ke kondisi awal.
+			 */
+			function init() {
+				isGameOver = false;
+				score = 0;
+				playerHealth = 100;
+				frameCount = 0;
+
+				player = {
+					x: canvas.width / 2,
+					y: canvas.height - TANK_SIZE,
+					angle: -Math.PI / 2, // Arahkan ke atas
+				};
+
+				enemies = [];
+				for (let i = 0; i < ENEMY_COUNT; i++) {
+					enemies.push({
+						x: Math.random() * (canvas.width - TANK_SIZE) + TANK_SIZE / 2,
+						y: Math.random() * (canvas.height / 2) + TANK_SIZE / 2,
+						angle: Math.PI / 2, // Arahkan ke bawah
+						shootTimer: Math.floor(Math.random() * ENEMY_SHOOT_INTERVAL),
+					});
+				}
+
+				bullets = [];
+				enemyBullets = [];
+				keys = {};
+
+				gameOverScreen.style.display = "none";
+				updateHUD();
+				gameLoop();
+			}
+
+			/**
+			 * Memperbarui informasi di HUD (Heads-Up Display).
+			 */
+			function updateHUD() {
+				scoreEl.textContent = `Skor: ${score}`;
+				healthEl.textContent = `Kesehatan: ${playerHealth}`;
+			}
+
+			/**
+			 * Fungsi utama yang berjalan setiap frame.
+			 */
+			function gameLoop() {
+				if (isGameOver) {
+					showGameOverScreen();
+					return;
+				}
+
+				update();
+				draw();
+				frameCount++;
+
+				requestAnimationFrame(gameLoop);
+			}
+
+			/**
+			 * Memperbarui semua status objek dalam game.
+			 */
+			function update() {
+				// Pergerakan Player
+				if (keys["w"] || keys["ArrowUp"]) player.y -= PLAYER_SPEED;
+				if (keys["s"] || keys["ArrowDown"]) player.y += PLAYER_SPEED;
+				if (keys["a"] || keys["ArrowLeft"]) player.x -= PLAYER_SPEED;
+				if (keys["d"] || keys["ArrowRight"]) player.x += PLAYER_SPEED;
+
+				// Batasi pergerakan player di dalam canvas
+				player.x = Math.max(TANK_SIZE / 2, Math.min(canvas.width - TANK_SIZE / 2, player.x));
+				player.y = Math.max(TANK_SIZE / 2, Math.min(canvas.height - TANK_SIZE / 2, player.y));
+
+				// Update peluru player
+				bullets.forEach((bullet, index) => {
+					bullet.x += bullet.dx;
+					bullet.y += bullet.dy;
+					if (bullet.x < 0 || bullet.x > canvas.width || bullet.y < 0 || bullet.y > canvas.height) {
+						bullets.splice(index, 1);
+					}
+				});
+
+				// Update peluru musuh
+				enemyBullets.forEach((bullet, index) => {
+					bullet.x += bullet.dx;
+					bullet.y += bullet.dy;
+					if (bullet.x < 0 || bullet.x > canvas.width || bullet.y < 0 || bullet.y > canvas.height) {
+						enemyBullets.splice(index, 1);
+					}
+				});
+
+				// Update Musuh
+				enemies.forEach((enemy) => {
+					// AI Sederhana: bergerak ke arah player
+					const angleToPlayer = Math.atan2(player.y - enemy.y, player.x - enemy.x);
+					enemy.angle = angleToPlayer;
+					enemy.x += Math.cos(angleToPlayer) * ENEMY_SPEED;
+					enemy.y += Math.sin(angleToPlayer) * ENEMY_SPEED;
+
+					// Musuh menembak secara berkala
+					enemy.shootTimer++;
+					if (enemy.shootTimer >= ENEMY_SHOOT_INTERVAL) {
+						enemy.shootTimer = 0;
+						enemyBullets.push({
+							x: enemy.x,
+							y: enemy.y,
+							dx: Math.cos(enemy.angle) * BULLET_SPEED,
+							dy: Math.sin(enemy.angle) * BULLET_SPEED,
+							color: "#ff4136",
+						});
+					}
+				});
+
+				// Cek Kolisi
+				checkCollisions();
+			}
+
+			/**
+			 * Menggambar semua objek ke canvas.
+			 */
+			function draw() {
+				ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+				// Gambar Player
+				drawTank(player.x, player.y, "#0074d9", player.angle);
+
+				// Gambar Musuh
+				enemies.forEach((enemy) => {
+					drawTank(enemy.x, enemy.y, "#ff4136", enemy.angle);
+				});
+
+				// Gambar Peluru
+				bullets.forEach(drawBullet);
+				enemyBullets.forEach(drawBullet);
+			}
+
+			/**
+			 * Memeriksa semua kemungkinan tabrakan (kolisi).
+			 */
+			function checkCollisions() {
+				// Kolisi peluru player dengan musuh
+				bullets.forEach((bullet, bIndex) => {
+					enemies.forEach((enemy, eIndex) => {
+						const dist = Math.hypot(bullet.x - enemy.x, bullet.y - enemy.y);
+						if (dist < TANK_SIZE / 2 + BULLET_SIZE) {
+							enemies.splice(eIndex, 1);
+							bullets.splice(bIndex, 1);
+							score += 10;
+							updateHUD();
+						}
+					});
+				});
+
+				// Kolisi peluru musuh dengan player
+				enemyBullets.forEach((bullet, bIndex) => {
+					const dist = Math.hypot(bullet.x - player.x, bullet.y - player.y);
+					if (dist < TANK_SIZE / 2 + BULLET_SIZE) {
+						enemyBullets.splice(bIndex, 1);
+						playerHealth -= 10;
+						updateHUD();
+						if (playerHealth <= 0) {
+							playerHealth = 0;
+							isGameOver = true;
+						}
+					}
+				});
+
+				// Cek kondisi menang
+				if (enemies.length === 0) {
+					isGameOver = true;
+				}
+			}
+
+			/**
+			 * Menampilkan layar Game Over atau Menang.
+			 */
+			function showGameOverScreen() {
+				if (enemies.length === 0) {
+					gameOverTitle.textContent = "KAMU MENANG!";
+				} else {
+					gameOverTitle.textContent = "GAME OVER";
+				}
+				finalScoreEl.textContent = `Skor Akhir: ${score}`;
+				gameOverScreen.style.display = "block";
+			}
+
+			// --- Event Listeners ---
+			window.addEventListener("keydown", (e) => {
+				keys[e.key.toLowerCase()] = true;
+			});
+
+			window.addEventListener("keyup", (e) => {
+				keys[e.key.toLowerCase()] = false;
+			});
+
+			canvas.addEventListener("mousemove", (e) => {
+				const rect = canvas.getBoundingClientRect();
+				const mouseX = e.clientX - rect.left;
+				const mouseY = e.clientY - rect.top;
+				player.angle = Math.atan2(mouseY - player.y, mouseX - player.x);
+			});
+
+			canvas.addEventListener("click", (e) => {
+				if (isGameOver) return;
+
+				bullets.push({
+					x: player.x,
+					y: player.y,
+					dx: Math.cos(player.angle) * BULLET_SPEED,
+					dy: Math.sin(player.angle) * BULLET_SPEED,
+					color: "#7fdbff",
+				});
+			});
+
+			restartButton.addEventListener("click", init);
+
+			// --- Mulai Game ---
+			init();
+		</script>
+	</body>
+</html>
