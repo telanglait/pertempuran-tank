@@ -1,1 +1,1 @@
-<img src="minitank"/>
+<img src="minitank.png"/>
